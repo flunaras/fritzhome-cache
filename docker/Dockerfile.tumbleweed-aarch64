@@ -1,0 +1,81 @@
+# Build image for openSUSE Tumbleweed — cross-compilation for aarch64
+#
+# Strategy: x86_64 container with the aarch64-suse-linux GCC14 cross-compiler
+# from the standard Tumbleweed OSS repo, plus an aarch64 OpenSSL sysroot built
+# by downloading and extracting aarch64 RPMs from the openSUSE ports mirror.
+#
+# No QEMU / binfmt_misc required on the host.
+#
+# FetchContent dependencies (cpp-httplib, nlohmann/json, CLI11) are header-only;
+# they are fetched at cmake configure time and compiled by the cross-compiler —
+# no aarch64 pre-built packages needed for them.
+#
+# Cross-compiler binary prefix: aarch64-suse-linux-
+# Sysroot location:              /usr/aarch64-suse-linux/sys-root
+# CMake toolchain file:          /src/cmake/toolchain-aarch64.cmake
+
+FROM opensuse/tumbleweed:latest
+
+LABEL org.opencontainers.image.title="fritzhome-cache-builder-tumbleweed-aarch64"
+LABEL org.opencontainers.image.description="Cross-build environment for fritzhome-cache on openSUSE Tumbleweed (target aarch64)"
+
+# ── Base build tools (x86_64 host) ───────────────────────────────────────────
+# The base Tumbleweed image ships busybox-gawk, which conflicts with the real
+# gawk package that rpm-build requires.  git-core (a git dependency) also needs
+# a real gawk provider.  Remove the stub and install everything — including git —
+# in a single zypper transaction so all gawk-dependent packages stay consistent.
+RUN zypper --non-interactive remove busybox-gawk || true && \
+    zypper --non-interactive install --no-recommends \
+        cmake \
+        ninja \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+        which \
+        curl \
+        cpio \
+        gawk \
+        rpm-build
+
+# ── aarch64 cross-compiler (runs on x86_64, targets aarch64-suse-linux) ──────
+# Pulls in cross-aarch64-binutils and a minimal aarch64 glibc sysroot at
+# /usr/aarch64-suse-linux/sys-root (crt1.o, libc, libgcc_s …).
+RUN zypper --non-interactive install --no-recommends \
+        cross-aarch64-gcc14 \
+        cross-aarch64-binutils
+
+# ── Build the aarch64 sysroot — OpenSSL ───────────────────────────────────────
+# Download the aarch64 OpenSSL RPMs from the openSUSE ports mirror and extract
+# them into the cross-compiler's glibc sysroot with rpm2cpio.
+#
+# libopenssl3         — libssl.so.3 and libcrypto.so.3 (runtime .so)
+# libopenssl-3-devel  — headers (openssl/*.h) and .so symlinks (needed by CMake
+#                       find_package(OpenSSL) and by the linker)
+#
+# Ports mirror layout:
+#   aarch64 packages: https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/aarch64/
+
+ENV SYSROOT=/usr/aarch64-suse-linux/sys-root
+ENV PORTS_BASE=https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss
+
+RUN set -euo pipefail; \
+    cd /tmp; \
+    for pkg in \
+        libopenssl3 \
+        libopenssl-3-devel \
+    ; do \
+        url=$(curl -sL "${PORTS_BASE}/aarch64/" | grep -oP "href=\"\K\./${pkg}-[^\"]+\.aarch64\.rpm" | head -1 | sed 's|^\./||'); \
+        echo "Fetching: ${PORTS_BASE}/aarch64/${url}"; \
+        curl -fsSL "${PORTS_BASE}/aarch64/${url}" -o pkg.rpm; \
+        rpm2cpio pkg.rpm | cpio -idmv --quiet 2>/dev/null; \
+        rm -f pkg.rpm; \
+    done; \
+    cp -a --no-preserve=ownership /tmp/usr/. "${SYSROOT}/usr/"; \
+    rm -rf /tmp/usr
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

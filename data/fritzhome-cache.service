@@ -1,0 +1,45 @@
+[Unit]
+Description=Fritz!Box Smart Home API cache proxy
+Documentation=https://github.com/flunaras/fritzhome-cache
+After=network.target
+
+[Service]
+Type=simple
+# Settings are read from /etc/fritzhome-cache/fritzhome-cache.conf.
+# Edit that file to configure the upstream address, TTL, listen port, etc.
+#
+# To override individual settings without editing either file, create a
+# drop-in (systemctl edit fritzhome-cache).  Example:
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/bin/fritzhome-cache \
+#     --config /etc/fritzhome-cache/fritzhome-cache.conf \
+#     --fritzbox-addr 192.168.178.1 \
+#     --ttl 10 \
+#     -vv
+ExecStart=/usr/bin/fritzhome-cache --config /etc/fritzhome-cache/fritzhome-cache.conf
+Restart=on-failure
+RestartSec=5s
+
+# Run as a transient dynamic user — systemd allocates an unprivileged
+# UID/GID at service start time; no pre-created account is required.
+# DynamicUser=yes implies ProtectSystem=strict, so the root filesystem is
+# mounted read-only; the service can still read world-readable files such
+# as /etc/fritzhome-cache/fritzhome-cache.conf (installed mode 644).
+DynamicUser=yes
+
+# Security hardening (several of these are already implied by DynamicUser=yes,
+# listed here explicitly for auditability)
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

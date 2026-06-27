@@ -1,0 +1,7 @@
+#!/bin/sh
+# DEB postrm — runs after the package is removed or purged.
+# $1 = "remove" on removal, $1 = "purge" on purge.
+set -e
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    systemctl daemon-reload || true
+fi

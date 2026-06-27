@@ -1,0 +1,12 @@
+#!/bin/sh
+# DEB prerm — runs before the package is removed or upgraded.
+# $1 = "remove" on removal, $1 = "upgrade" on upgrade (keep service running).
+set -e
+if [ "$1" = "remove" ]; then
+    if systemctl is-active --quiet fritzhome-cache.service 2>/dev/null; then
+        systemctl stop fritzhome-cache.service || true
+    fi
+    if systemctl is-enabled --quiet fritzhome-cache.service 2>/dev/null; then
+        systemctl disable fritzhome-cache.service || true
+    fi
+fi

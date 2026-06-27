@@ -1,0 +1,38 @@
+# Build image for openSUSE Tumbleweed — fritzhome-cache (x86_64, native)
+#
+# Dependencies fetched via CMake FetchContent at configure time:
+#   cpp-httplib v0.18.0  (header-only, OpenSSL support)
+#   nlohmann/json v3.11.3 (header-only)
+#   CLI11 v2.4.2          (header-only)
+#
+# OpenSSL is the only system library required; git is needed by FetchContent.
+
+FROM opensuse/tumbleweed:latest
+
+LABEL org.opencontainers.image.title="fritzhome-cache-builder-tumbleweed"
+LABEL org.opencontainers.image.description="Build environment for fritzhome-cache on openSUSE Tumbleweed (x86_64)"
+
+# ── All build dependencies ────────────────────────────────────────────────────
+# The base Tumbleweed image ships busybox-gawk, which conflicts with the real
+# gawk package that rpm-build requires.  git-core (a git dependency) also needs
+# a real gawk provider.  Remove the stub and install everything — including git —
+# in a single zypper transaction so all gawk-dependent packages stay consistent.
+RUN zypper --non-interactive remove busybox-gawk || true && \
+    zypper --non-interactive install --no-recommends \
+        cmake \
+        ninja \
+        gcc-c++ \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+        which \
+        libopenssl-devel \
+        gawk \
+        rpm-build
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

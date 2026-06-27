@@ -1,0 +1,72 @@
+# Build image for Raspberry Pi OS bookworm — cross-compilation for aarch64
+#
+# Strategy: x86_64 Debian 12 container with Debian's multiarch support.
+# Adding the arm64 architecture makes apt install aarch64 libraries
+# (libssl-dev:arm64) alongside the native x86_64 ones.  The
+# g++-aarch64-linux-gnu cross-compiler then targets those libraries directly —
+# no QEMU / binfmt_misc required on the host.
+#
+# Raspberry Pi OS bookworm is Debian 12 for aarch64, so the resulting binary
+# and .deb package are binary-compatible.
+#
+# Cross-compiler binary prefix: aarch64-linux-gnu-
+# OpenSSL staging root:          /opt/openssl-aarch64
+#   include/ → /usr/include              (headers, same for all arches on Debian)
+#   lib/     → /usr/lib/aarch64-linux-gnu (arm64 .so/.a from libssl-dev:arm64)
+# CMake toolchain file:          /src/cmake/toolchain-raspbian-aarch64.cmake
+
+FROM debian:12
+
+LABEL org.opencontainers.image.title="fritzhome-cache-builder-raspbian-aarch64"
+LABEL org.opencontainers.image.description="Cross-build environment for fritzhome-cache targeting Raspberry Pi OS bookworm (aarch64)"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Enable arm64 multiarch ────────────────────────────────────────────────────
+# Must happen before apt-get update so the arm64 package lists are fetched.
+RUN dpkg --add-architecture arm64
+
+# ── Base build tools + aarch64 cross-compiler ─────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        ninja-build \
+        g++-aarch64-linux-gnu \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── OpenSSL arm64 development libraries (Debian multiarch) ────────────────────
+# libssl-dev:arm64 pulls in libssl3:arm64 (runtime .so files) as a dependency,
+# so the cross-linker has real ELF aarch64 shared objects to validate against.
+# Headers land in /usr/include/openssl/ (shared with the native arch on Debian).
+# Libraries land in /usr/lib/aarch64-linux-gnu/.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl-dev:arm64 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Create a unified OpenSSL staging root ─────────────────────────────────────
+# CMake's FindOpenSSL.cmake expects a root with include/ and lib/ subdirs.
+# /opt/openssl-aarch64/include  →  /usr/include              (headers)
+# /opt/openssl-aarch64/lib      →  /usr/lib/aarch64-linux-gnu (.so/.a)
+#
+# OPENSSL_ROOT_DIR=/opt/openssl-aarch64 is set in the CMake toolchain file.
+# This works for both dynamic and static (OPENSSL_USE_STATIC_LIBS=ON) builds
+# because both libssl.so and libssl.a live under lib/.
+RUN mkdir -p /opt/openssl-aarch64 \
+    && ln -s /usr/include             /opt/openssl-aarch64/include \
+    && ln -s /usr/lib/aarch64-linux-gnu /opt/openssl-aarch64/lib
+
+# ── DEB packaging tools ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dpkg-dev \
+        fakeroot \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

@@ -1,0 +1,44 @@
+# Build image for Debian 12 (bookworm) — fritzhome-cache (x86_64), DEB packaging
+#
+# Dependencies fetched via CMake FetchContent at configure time:
+#   cpp-httplib v0.18.0  (header-only, OpenSSL support)
+#   nlohmann/json v3.11.3 (header-only)
+#   CLI11 v2.4.2          (header-only)
+#
+# OpenSSL is the only system library required; git is needed by FetchContent.
+
+FROM debian:12
+
+LABEL org.opencontainers.image.title="fritzhome-cache-builder-debian"
+LABEL org.opencontainers.image.description="Build environment for fritzhome-cache on Debian 12 bookworm (x86_64)"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Base build tools ──────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        ninja-build \
+        g++ \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── OpenSSL development libraries ─────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── DEB packaging tools ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dpkg-dev \
+        fakeroot \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

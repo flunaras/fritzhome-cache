@@ -1,0 +1,84 @@
+# Build image for Raspberry Pi OS bullseye — cross-compilation for armhf (32-bit ARM)
+#
+# Strategy: x86_64 Debian 11 (bullseye) container with Debian's multiarch
+# support.  Using Debian 11 as the base ensures the binary is linked against
+# glibc 2.31 (bullseye's libc), so it runs on Raspberry Pi OS bullseye
+# installations without "GLIBC_2.3x not found" errors.
+#
+# Key differences from Dockerfile.raspbian-armhf (bookworm base):
+#   - Base image: debian:11  (glibc 2.31, OpenSSL 1.1.1)
+#   - cmake from bullseye-backports (debian:11 ships cmake 3.18 < 3.20 minimum;
+#     bullseye-backports provides cmake 3.25.1)
+#   - OpenSSL 1.1.1 headers/libs — cpp-httplib must be pinned to v0.14.3 via
+#     -DFRITZHOME_HTTPLIB_TAG=v0.14.3 (v0.15.0+ requires OpenSSL >= 3.0.0)
+#
+# Cross-compiler binary prefix: arm-linux-gnueabihf-
+# OpenSSL staging root:          /opt/openssl-armhf
+#   include/ → /usr/include              (headers, shared across arches)
+#   lib/     → /usr/lib/arm-linux-gnueabihf (armhf .so/.a from libssl-dev:armhf)
+# CMake toolchain file:          /src/cmake/toolchain-raspbian-bullseye-armhf.cmake
+
+FROM debian:11
+
+LABEL org.opencontainers.image.title="fritzhome-cache-builder-raspbian-bullseye-armhf"
+LABEL org.opencontainers.image.description="Cross-build environment for fritzhome-cache targeting Raspberry Pi OS bullseye (armhf / 32-bit)"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Enable bullseye-backports (provides cmake >= 3.20) ────────────────────────
+# debian:11 ships cmake 3.18 which is below our cmake_minimum_required(3.20).
+# bullseye-backports provides cmake 3.25.1.
+# Note: Debian 11 (bullseye) reached end-of-life in June 2024 and its backports
+# repository has moved to archive.debian.org.  The Check-Valid-Until override
+# suppresses the "Release file expired" error from apt.
+RUN echo "deb http://archive.debian.org/debian bullseye-backports main" \
+        > /etc/apt/sources.list.d/backports.list \
+    && echo 'Acquire::Check-Valid-Until "false";' \
+        > /etc/apt/apt.conf.d/99no-check-valid-until
+
+# ── Enable armhf multiarch ────────────────────────────────────────────────────
+# Must happen before apt-get update so the armhf package lists are fetched.
+RUN dpkg --add-architecture armhf
+
+# ── Base build tools + armhf cross-compiler ───────────────────────────────────
+# Most tools come from bullseye main; cmake is pinned to bullseye-backports.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ninja-build \
+        g++-arm-linux-gnueabihf \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+    && apt-get install -y --no-install-recommends -t bullseye-backports \
+        cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── OpenSSL armhf development libraries (Debian multiarch, OpenSSL 1.1.1) ────
+# libssl-dev:armhf on bullseye provides OpenSSL 1.1.1 headers and armhf libs.
+# Headers land in /usr/include/openssl/; libs in /usr/lib/arm-linux-gnueabihf/.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl-dev:armhf \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Create a unified OpenSSL staging root ─────────────────────────────────────
+# CMake's FindOpenSSL.cmake expects a root with include/ and lib/ subdirs.
+# /opt/openssl-armhf/include  →  /usr/include              (headers)
+# /opt/openssl-armhf/lib      →  /usr/lib/arm-linux-gnueabihf (.so/.a)
+#
+# OPENSSL_ROOT_DIR=/opt/openssl-armhf is set in the CMake toolchain file.
+RUN mkdir -p /opt/openssl-armhf \
+    && ln -s /usr/include               /opt/openssl-armhf/include \
+    && ln -s /usr/lib/arm-linux-gnueabihf /opt/openssl-armhf/lib
+
+# ── DEB packaging tools ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dpkg-dev \
+        fakeroot \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

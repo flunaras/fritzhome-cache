@@ -1,0 +1,70 @@
+# Build image for Raspberry Pi OS bookworm — cross-compilation for armhf (32-bit ARM)
+#
+# Strategy: x86_64 Debian 12 container with Debian's multiarch support.
+# Adding the armhf architecture makes apt install 32-bit ARM libraries
+# (libssl-dev:armhf) alongside the native x86_64 ones.  The
+# g++-arm-linux-gnueabihf cross-compiler then targets those libraries directly
+# — no QEMU / binfmt_misc required on the host.
+#
+# This target produces a binary for Raspberry Pi OS bookworm 32-bit (armhf),
+# which is what most existing Raspberry Pi installations use.
+#
+# Cross-compiler binary prefix: arm-linux-gnueabihf-
+# OpenSSL staging root:          /opt/openssl-armhf
+#   include/ → /usr/include              (headers, same for all arches on Debian)
+#   lib/     → /usr/lib/arm-linux-gnueabihf (armhf .so/.a from libssl-dev:armhf)
+# CMake toolchain file:          /src/cmake/toolchain-raspbian-armhf.cmake
+
+FROM debian:12
+
+LABEL org.opencontainers.image.title="fritzhome-cache-builder-raspbian-armhf"
+LABEL org.opencontainers.image.description="Cross-build environment for fritzhome-cache targeting Raspberry Pi OS bookworm (armhf / 32-bit)"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Enable armhf multiarch ────────────────────────────────────────────────────
+# Must happen before apt-get update so the armhf package lists are fetched.
+RUN dpkg --add-architecture armhf
+
+# ── Base build tools + armhf cross-compiler ───────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        ninja-build \
+        g++-arm-linux-gnueabihf \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── OpenSSL armhf development libraries (Debian multiarch) ────────────────────
+# libssl-dev:armhf pulls in libssl3:armhf (runtime .so files) as a dependency,
+# so the cross-linker has real ELF armhf shared objects to validate against.
+# Headers land in /usr/include/openssl/ (shared with the native arch on Debian).
+# Libraries land in /usr/lib/arm-linux-gnueabihf/.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl-dev:armhf \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Create a unified OpenSSL staging root ─────────────────────────────────────
+# CMake's FindOpenSSL.cmake expects a root with include/ and lib/ subdirs.
+# /opt/openssl-armhf/include  →  /usr/include              (headers)
+# /opt/openssl-armhf/lib      →  /usr/lib/arm-linux-gnueabihf (.so/.a)
+#
+# OPENSSL_ROOT_DIR=/opt/openssl-armhf is set in the CMake toolchain file.
+RUN mkdir -p /opt/openssl-armhf \
+    && ln -s /usr/include               /opt/openssl-armhf/include \
+    && ln -s /usr/lib/arm-linux-gnueabihf /opt/openssl-armhf/lib
+
+# ── DEB packaging tools ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dpkg-dev \
+        fakeroot \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

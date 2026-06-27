@@ -1,0 +1,42 @@
+# Build trees and output packages
+build/
+out/
+
+# CMake generated files (in-source builds)
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+CPackConfig.cmake
+CPackSourceConfig.cmake
+_CPack_Packages/
+
+# Compiled objects and libraries
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+
+# Compiled binary (in-source builds)
+fritzhome-cache
+
+# Ninja
+.ninja_deps
+.ninja_log
+build.ninja
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.clangd/
+.cache/
+compile_commands.json
+
+# OS
+.DS_Store
+Thumbs.db
