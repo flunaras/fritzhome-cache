@@ -1,0 +1,1 @@
+# fritzhome-cache
